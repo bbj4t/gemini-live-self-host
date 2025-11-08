@@ -28,11 +28,7 @@ const App: React.FC = () => {
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [serviceMode, setServiceMode] = useState<ServiceMode>('gemini');
-  const [llmEndpoint, setLlmEndpoint] = useState('');
   const [llmModel, setLlmModel] = useState('');
-  const [ttsEndpoint, setTtsEndpoint] = useState('');
-  const [llmApiCred, setLlmApiCred] = useState('');
-  const [ttsApiCred, setTtsApiCred] = useState('');
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
   
@@ -64,11 +60,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const savedMode = localStorage.getItem('serviceMode') as ServiceMode;
     if (savedMode) setServiceMode(savedMode);
-    setLlmEndpoint(localStorage.getItem('llmEndpoint') || '');
     setLlmModel(localStorage.getItem('llmModel') || '');
-    setTtsEndpoint(localStorage.getItem('ttsEndpoint') || '');
-    setLlmApiCred(localStorage.getItem('llmApiCred') || '');
-    setTtsApiCred(localStorage.getItem('ttsApiCred') || '');
     setSupabaseUrl(localStorage.getItem('supabaseUrl') || '');
     setSupabaseKey(localStorage.getItem('supabaseKey') || '');
   }, []);
@@ -103,11 +95,7 @@ const App: React.FC = () => {
 
   // Handlers to save settings to localStorage
   const handleSetServiceMode = (mode: ServiceMode) => { setServiceMode(mode); localStorage.setItem('serviceMode', mode); };
-  const handleSetLlmEndpoint = (url: string) => { setLlmEndpoint(url); localStorage.setItem('llmEndpoint', url); };
   const handleSetLlmModel = (model: string) => { setLlmModel(model); localStorage.setItem('llmModel', model); };
-  const handleSetTtsEndpoint = (url: string) => { setTtsEndpoint(url); localStorage.setItem('ttsEndpoint', url); };
-  const handleSetLlmApiCred = (cred: string) => { setLlmApiCred(cred); localStorage.setItem('llmApiCred', cred); };
-  const handleSetTtsApiCred = (cred: string) => { setTtsApiCred(cred); localStorage.setItem('ttsApiCred', cred); };
   const handleSetSupabaseUrl = (url: string) => { setSupabaseUrl(url); localStorage.setItem('supabaseUrl', url); };
   const handleSetSupabaseKey = (key: string) => { setSupabaseKey(key); localStorage.setItem('supabaseKey', key); };
 
@@ -216,7 +204,7 @@ const App: React.FC = () => {
 
   const startSelfHostedConversation = useCallback(async () => {
     if (!recognition) { setError("Web Speech API is not supported by this browser."); setAppState('error'); return; }
-    if (!llmEndpoint || !ttsEndpoint) { setError("Please set LLM and TTS endpoints in settings."); setAppState('error'); setIsSettingsOpen(true); return; }
+    if (!supabaseClient) { setError("Please configure Supabase in settings to use self-hosted mode."); setAppState('error'); setIsSettingsOpen(true); return; }
     
     setError(null);
     setAppState('listening');
@@ -242,32 +230,28 @@ const App: React.FC = () => {
         setAppState('processing');
         try {
             let finalPrompt = userTranscript;
-            if (supabaseClient) {
-                const context = await performRagSearch(userTranscript);
-                if (context) {
-                    finalPrompt = `Using the following context, answer the question.\n\nContext:\n${context}\n\nQuestion: ${userTranscript}`;
-                }
+            const context = await performRagSearch(userTranscript);
+            if (context) {
+                finalPrompt = `Using the following context, answer the question.\n\nContext:\n${context}\n\nQuestion: ${userTranscript}`;
             }
-            const llmHeaders: HeadersInit = { 'Content-Type': 'application/json' };
-            if (llmApiCred) llmHeaders['Authorization'] = llmApiCred.startsWith('Bearer ') ? llmApiCred : `Bearer ${llmApiCred}`;
-            
-            const llmPayload: { prompt: string, model?: string } = { prompt: finalPrompt };
-            if (llmModel) llmPayload.model = llmModel;
 
-            const llmRes = await fetch(llmEndpoint, { method: 'POST', headers: llmHeaders, body: JSON.stringify(llmPayload) });
-            if (!llmRes.ok) throw new Error(`LLM API error: ${llmRes.statusText}`);
-            const llmResult = await llmRes.json();
+            // Call the secure LLM proxy function
+            const { data: llmResult, error: llmError } = await supabaseClient.functions.invoke('llm-proxy', {
+                body: { type: 'llm', prompt: finalPrompt, model: llmModel }
+            });
+
+            if (llmError) throw new Error(`LLM Proxy Error: ${llmError.message}`);
             const modelResText = llmResult.response;
-            if (!modelResText) throw new Error("LLM response format incorrect. Expected { \"response\": \"...\" }.");
+            if (!modelResText) throw new Error("LLM response format incorrect from proxy.");
             setCurrentTurn(p => ({ ...p, model: modelResText }));
             
-            const ttsHeaders: HeadersInit = { 'Content-Type': 'application/json' };
-            if (ttsApiCred) ttsHeaders['Authorization'] = ttsApiCred.startsWith('Bearer ') ? ttsApiCred : `Bearer ${ttsApiCred}`;
-            const ttsRes = await fetch(ttsEndpoint, { method: 'POST', headers: ttsHeaders, body: JSON.stringify({ text: modelResText }) });
-            if (!ttsRes.ok) throw new Error(`TTS API error: ${ttsRes.statusText}`);
-            const ttsResult = await ttsRes.json();
+            // Call the secure TTS proxy function
+            const { data: ttsResult, error: ttsError } = await supabaseClient.functions.invoke('llm-proxy', {
+                body: { type: 'tts', text: modelResText }
+            });
+            if (ttsError) throw new Error(`TTS Proxy Error: ${ttsError.message}`);
             const audioB64 = ttsResult.audioContent;
-            if (!audioB64) throw new Error("TTS response format incorrect. Expected { \"audioContent\": \"...\" }.");
+            if (!audioB64) throw new Error("TTS response format incorrect from proxy.");
 
             const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
             if (outputAudioContextRef.current?.state === 'closed' || !outputAudioContextRef.current) outputAudioContextRef.current = new AudioContext({ sampleRate: 24000 });
@@ -298,7 +282,7 @@ const App: React.FC = () => {
         recognition.start();
     } catch (err: any) { setError(`Microphone access denied: ${err.message}`); setAppState('error'); cleanupAudio(); }
 
-  }, [llmEndpoint, ttsEndpoint, cleanupAudio, llmApiCred, ttsApiCred, supabaseClient, llmModel]);
+  }, [cleanupAudio, supabaseClient, llmModel]);
 
   // --- Main Controller ---
   const toggleConversation = () => {
@@ -325,17 +309,9 @@ const App: React.FC = () => {
         isOpen={isSettingsOpen} 
         onClose={() => setIsSettingsOpen(false)} 
         serviceMode={serviceMode} 
-        setServiceMode={handleSetServiceMode} 
-        llmEndpoint={llmEndpoint} 
-        setLlmEndpoint={handleSetLlmEndpoint} 
+        setServiceMode={handleSetServiceMode}
         llmModel={llmModel}
         setLlmModel={handleSetLlmModel}
-        ttsEndpoint={ttsEndpoint} 
-        setTtsEndpoint={handleSetTtsEndpoint} 
-        llmApiCred={llmApiCred} 
-        setLlmApiCred={handleSetLlmApiCred} 
-        ttsApiCred={ttsApiCred} 
-        setTtsApiCred={handleSetTtsApiCred}
         supabaseUrl={supabaseUrl}
         setSupabaseUrl={handleSetSupabaseUrl}
         supabaseKey={supabaseKey}

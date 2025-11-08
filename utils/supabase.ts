@@ -90,6 +90,7 @@ export const getChatHistory = async (sessionId: string): Promise<TranscriptTurn[
         throw error; // Let the caller handle UI updates
     }
     
+    // The select query now returns user_text and model_text
     return data.map(item => ({
         id: item.id,
         user: item.user_text,

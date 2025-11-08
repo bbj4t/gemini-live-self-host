@@ -6,16 +6,8 @@ interface SettingsModalProps {
   onClose: () => void;
   serviceMode: ServiceMode;
   setServiceMode: (mode: ServiceMode) => void;
-  llmEndpoint: string;
-  setLlmEndpoint: (url: string) => void;
   llmModel: string;
   setLlmModel: (model: string) => void;
-  ttsEndpoint: string;
-  setTtsEndpoint: (url: string) => void;
-  llmApiCred: string;
-  setLlmApiCred: (cred: string) => void;
-  ttsApiCred: string;
-  setTtsApiCred: (cred: string) => void;
   supabaseUrl: string;
   setSupabaseUrl: (url: string) => void;
   supabaseKey: string;
@@ -27,42 +19,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   serviceMode,
   setServiceMode,
-  llmEndpoint,
-  setLlmEndpoint,
   llmModel,
   setLlmModel,
-  ttsEndpoint,
-  setTtsEndpoint,
-  llmApiCred,
-  setLlmApiCred,
-  ttsApiCred,
-  setTtsApiCred,
   supabaseUrl,
   setSupabaseUrl,
   supabaseKey,
   setSupabaseKey,
 }) => {
   const [localServiceMode, setLocalServiceMode] = useState(serviceMode);
-  const [localLlmEndpoint, setLocalLlmEndpoint] = useState(llmEndpoint);
   const [localLlmModel, setLocalLlmModel] = useState(llmModel);
-  const [localTtsEndpoint, setLocalTtsEndpoint] = useState(ttsEndpoint);
-  const [localLlmApiCred, setLocalLlmApiCred] = useState(llmApiCred);
-  const [localTtsApiCred, setLocalTtsApiCred] = useState(ttsApiCred);
   const [localSupabaseUrl, setLocalSupabaseUrl] = useState(supabaseUrl);
   const [localSupabaseKey, setLocalSupabaseKey] = useState(supabaseKey);
 
   useEffect(() => {
     if (isOpen) {
         setLocalServiceMode(serviceMode);
-        setLocalLlmEndpoint(llmEndpoint);
         setLocalLlmModel(llmModel);
-        setLocalTtsEndpoint(ttsEndpoint);
-        setLocalLlmApiCred(llmApiCred);
-        setLocalTtsApiCred(ttsApiCred);
         setLocalSupabaseUrl(supabaseUrl);
         setLocalSupabaseKey(supabaseKey);
     }
-  }, [isOpen, serviceMode, llmEndpoint, llmModel, ttsEndpoint, llmApiCred, ttsApiCred, supabaseUrl, supabaseKey]);
+  }, [isOpen, serviceMode, llmModel, supabaseUrl, supabaseKey]);
 
   if (!isOpen) {
     return null;
@@ -70,11 +46,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSave = () => {
     setServiceMode(localServiceMode);
-    setLlmEndpoint(localLlmEndpoint);
     setLlmModel(localLlmModel);
-    setTtsEndpoint(localTtsEndpoint);
-    setLlmApiCred(localLlmApiCred);
-    setTtsApiCred(localTtsApiCred);
     setSupabaseUrl(localSupabaseUrl);
     setSupabaseKey(localSupabaseKey);
     onClose();
@@ -111,22 +83,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {localServiceMode === 'self-hosted' && (
           <div className="space-y-4 animate-fade-in mb-6">
-            <div>
-              <label htmlFor="llm-endpoint" className="block text-gray-400 text-sm font-bold mb-2">
-                LLM API Endpoint
-              </label>
-              <input
-                id="llm-endpoint"
-                type="url"
-                value={localLlmEndpoint}
-                onChange={(e) => setLocalLlmEndpoint(e.target.value)}
-                placeholder="https://example.com/api/llm"
-                className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+             <p className="text-sm text-gray-400">
+                Self-hosted mode now uses a Supabase Edge Function as a secure proxy.
+                Please configure your API endpoints and credentials as secrets in your Supabase project settings.
+             </p>
              <div>
               <label htmlFor="llm-model" className="block text-gray-400 text-sm font-bold mb-2">
-                LLM Model (Optional)
+                LLM Model Name (Optional)
               </label>
               <input
                 id="llm-model"
@@ -137,53 +100,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label htmlFor="llm-api-cred" className="block text-gray-400 text-sm font-bold mb-2">
-                LLM API Credential (Optional)
-              </label>
-              <input
-                id="llm-api-cred"
-                type="password"
-                value={localLlmApiCred}
-                onChange={(e) => setLocalLlmApiCred(e.target.value)}
-                placeholder="Authentication Token"
-                className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label htmlFor="tts-endpoint" className="block text-gray-400 text-sm font-bold mb-2">
-                TTS API Endpoint
-              </label>
-              <input
-                id="tts-endpoint"
-                type="url"
-                value={localTtsEndpoint}
-                onChange={(e) => setLocalTtsEndpoint(e.target.value)}
-                placeholder="https://example.com/api/tts"
-                className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label htmlFor="tts-api-cred" className="block text-gray-400 text-sm font-bold mb-2">
-                TTS API Credential (Optional)
-              </label>
-              <input
-                id="tts-api-cred"
-                type="password"
-                value={localTtsApiCred}
-                onChange={(e) => setLocalTtsApiCred(e.target.value)}
-                placeholder="Authentication Token"
-                className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
           </div>
         )}
 
         <div className="pt-6 border-t border-gray-700">
           <h3 className="text-lg font-semibold mb-2 text-white">Supabase Backend</h3>
           <p className="text-sm text-gray-400 mb-4">
-            Enable chat history for all modes and RAG for self-hosted mode. 
-            You'll need a <code className="bg-gray-900 px-1 rounded-sm">chat_history</code> table and a <code className="bg-gray-900 px-1 rounded-sm">vector-search</code> edge function.
+            Required for all modes to enable chat history and RAG. Self-hosted mode also requires a <code className="bg-gray-900 px-1 rounded-sm">llm-proxy</code> edge function.
           </p>
           <div className="space-y-4">
             <div>
