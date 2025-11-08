@@ -15,8 +15,8 @@ export const initSupabase = (url: string, key: string): SupabaseClient | null =>
     if (url && key) {
         try {
             supabase = createClient(url, key);
-        } catch (error) {
-            console.error("Error initializing Supabase client:", error);
+        } catch (error: any) {
+            console.error("Error initializing Supabase client:", error.message || error);
             supabase = null;
         }
     } else {
@@ -43,8 +43,8 @@ export const performRagSearch = async (query: string): Promise<string> => {
         // Assuming the function returns an array of objects with a 'content' property
         const contextText = data.map((d: any) => d.content).join('\n---\n');
         return contextText;
-    } catch (error) {
-        console.error('Error performing RAG search:', error);
+    } catch (error: any) {
+        console.error('Error performing RAG search:', error.message || error);
         return ''; // Return empty string on error to not break the flow
     }
 };
@@ -65,8 +65,8 @@ export const saveChatTurn = async (sessionId: string, turn: { user: string; mode
                 model_text: turn.model,
             });
         if (error) throw error;
-    } catch (error) {
-        console.error('Error saving chat turn:', error);
+    } catch (error: any) {
+        console.error('Error saving chat turn:', error.message || error);
     }
 };
 
@@ -74,26 +74,25 @@ export const saveChatTurn = async (sessionId: string, turn: { user: string; mode
  * Retrieves the chat history for a given session from Supabase.
  * @param sessionId - The ID of the chat session to retrieve.
  * @returns An array of TranscriptTurn objects.
+ * @throws Will throw an error if the Supabase query fails.
  */
 export const getChatHistory = async (sessionId: string): Promise<TranscriptTurn[]> => {
     if (!supabase) return [];
-    try {
-        const { data, error } = await supabase
-            .from('chat_history')
-            .select('id, user_text, model_text')
-            .eq('session_id', sessionId)
-            .order('created_at', { ascending: true });
+    
+    const { data, error } = await supabase
+        .from('chat_history')
+        .select('id, user_text, model_text')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: true });
 
-        if (error) throw error;
-        
-        return data.map(item => ({
-            id: item.id,
-            user: item.user_text,
-            model: item.model_text
-        }));
-
-    } catch (error) {
-        console.error('Error fetching chat history:', error);
-        return [];
+    if (error) {
+        console.error('Error fetching chat history:', error.message || error);
+        throw error; // Let the caller handle UI updates
     }
+    
+    return data.map(item => ({
+        id: item.id,
+        user: item.user_text,
+        model: item.model_text
+    }));
 };

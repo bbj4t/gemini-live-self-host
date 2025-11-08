@@ -87,8 +87,13 @@ const App: React.FC = () => {
 
     const loadHistory = async () => {
         if (client && sessionIdRef.current) {
-            const history = await getChatHistory(sessionIdRef.current);
-            setTranscriptHistory(history);
+            try {
+                const history = await getChatHistory(sessionIdRef.current);
+                setTranscriptHistory(history);
+            } catch (err: any) {
+                setError(`Failed to load history: ${err.message}`);
+                setAppState('error');
+            }
         } else {
             setTranscriptHistory([]);
         }
