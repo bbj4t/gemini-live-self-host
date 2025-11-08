@@ -1,0 +1,316 @@
+import React from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+// FIX: Removed non-exported type 'LiveSession'.
+import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
+import { AppState, TranscriptTurn, ServiceMode } from './types';
+import { createBlob, decode, decodeAudioData } from './utils/audioUtils';
+import { ControlButton } from './components/ControlButton';
+import { StatusIndicator } from './components/StatusIndicator';
+import { TranscriptView } from './components/TranscriptView';
+import { SettingsModal } from './components/SettingsModal';
+import { SettingsIcon } from './components/SettingsIcon';
+
+// Web Speech API
+// FIX: Cast window to any to access SpeechRecognition properties.
+const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+if (recognition) {
+    recognition.continuous = false;
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;
+}
+
+const App: React.FC = () => {
+  // App State
+  const [appState, setAppState] = useState<AppState>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  // Settings State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [serviceMode, setServiceMode] = useState<ServiceMode>('gemini');
+  const [llmEndpoint, setLlmEndpoint] = useState('');
+  const [ttsEndpoint, setTtsEndpoint] = useState('');
+  const [llmApiCred, setLlmApiCred] = useState('');
+  const [ttsApiCred, setTtsApiCred] = useState('');
+
+  // Transcript State
+  const [transcriptHistory, setTranscriptHistory] = useState<TranscriptTurn[]>([]);
+  const [currentTurn, setCurrentTurn] = useState<{ user: string; model: string }>({ user: '', model: '' });
+
+  // Refs for Gemini Live API
+  // FIX: Use 'any' for the session promise since 'LiveSession' type is not exported.
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const micStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  
+  // Refs for Self-Hosted Mode
+  const finalTranscriptRef = useRef<string>('');
+  const wasStoppedManuallyRef = useRef<boolean>(false);
+
+  // Refs for Audio playback (both modes)
+  const inputAudioContextRef = useRef<AudioContext | null>(null);
+  const outputAudioContextRef = useRef<AudioContext | null>(null);
+  const nextStartTimeRef = useRef<number>(0);
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+
+  // Effect to load settings from localStorage
+  useEffect(() => {
+    const savedMode = localStorage.getItem('serviceMode') as ServiceMode;
+    const savedLlmUrl = localStorage.getItem('llmEndpoint');
+    const savedTtsUrl = localStorage.getItem('ttsEndpoint');
+    const savedLlmCred = localStorage.getItem('llmApiCred');
+    const savedTtsCred = localStorage.getItem('ttsApiCred');
+    if (savedMode) setServiceMode(savedMode);
+    if (savedLlmUrl) setLlmEndpoint(savedLlmUrl);
+    if (savedTtsUrl) setTtsEndpoint(savedTtsUrl);
+    if (savedLlmCred) setLlmApiCred(savedLlmCred);
+    if (savedTtsCred) setTtsApiCred(savedTtsCred);
+  }, []);
+
+  // Handlers to save settings to localStorage
+  const handleSetServiceMode = (mode: ServiceMode) => {
+    setServiceMode(mode);
+    localStorage.setItem('serviceMode', mode);
+  };
+  const handleSetLlmEndpoint = (url: string) => {
+    setLlmEndpoint(url);
+    localStorage.setItem('llmEndpoint', url);
+  };
+  const handleSetTtsEndpoint = (url: string) => {
+    setTtsEndpoint(url);
+    localStorage.setItem('ttsEndpoint', url);
+  };
+    const handleSetLlmApiCred = (cred: string) => {
+    setLlmApiCred(cred);
+    localStorage.setItem('llmApiCred', cred);
+  };
+  const handleSetTtsApiCred = (cred: string) => {
+    setTtsApiCred(cred);
+    localStorage.setItem('ttsApiCred', cred);
+  };
+
+  // --- Generic Cleanup ---
+  const cleanupAudio = useCallback((stopPlayback = true) => {
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+    micStreamSourceRef.current?.disconnect();
+    micStreamSourceRef.current = null;
+    
+    if (stopPlayback) {
+        for (const source of sourcesRef.current.values()) {
+            source.stop();
+        }
+        sourcesRef.current.clear();
+        nextStartTimeRef.current = 0;
+    }
+
+    if (inputAudioContextRef.current?.state !== 'closed') {
+        inputAudioContextRef.current?.close().catch(console.error);
+        inputAudioContextRef.current = null;
+    }
+    if (outputAudioContextRef.current?.state !== 'closed') {
+        outputAudioContextRef.current?.close().catch(console.error);
+        outputAudioContextRef.current = null;
+    }
+  }, []);
+  
+  // --- Gemini Mode ---
+  const stopGeminiConversation = useCallback(() => {
+    if (sessionPromiseRef.current) {
+        sessionPromiseRef.current.then((session) => session.close()).catch(console.error);
+        sessionPromiseRef.current = null;
+    }
+    cleanupAudio();
+    setAppState('idle');
+    setCurrentTurn({ user: '', model: '' });
+  }, [cleanupAudio]);
+
+  const startGeminiConversation = useCallback(async () => {
+    setError(null);
+    setAppState('connecting');
+    setTranscriptHistory([]);
+    setCurrentTurn({ user: '', model: '' });
+    try {
+        if (!process.env.API_KEY) throw new Error("API_KEY environment variable not set for Gemini.");
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        inputAudioContextRef.current = new AudioContext({ sampleRate: 16000 });
+        outputAudioContextRef.current = new AudioContext({ sampleRate: 24000 });
+        sessionPromiseRef.current = ai.live.connect({
+            model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+            config: {
+                responseModalities: [Modality.AUDIO],
+                inputAudioTranscription: {}, outputAudioTranscription: {},
+                systemInstruction: 'You are a helpful and friendly conversational AI. Your responses should be concise and conversational.'
+            },
+            callbacks: {
+                onopen: () => {
+                    setAppState('listening');
+                    const source = inputAudioContextRef.current!.createMediaStreamSource(micStreamRef.current!);
+                    micStreamSourceRef.current = source;
+                    const scriptProcessor = inputAudioContextRef.current!.createScriptProcessor(4096, 1, 1);
+                    processorRef.current = scriptProcessor;
+                    scriptProcessor.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        sessionPromiseRef.current?.then((s) => s.sendRealtimeInput({ media: createBlob(inputData) }));
+                    };
+                    source.connect(scriptProcessor);
+                    scriptProcessor.connect(inputAudioContextRef.current!.destination);
+                },
+                onmessage: async (message: LiveServerMessage) => {
+                    const { outputTranscription, inputTranscription, turnComplete, modelTurn } = message.serverContent ?? {};
+                    if(inputTranscription) setCurrentTurn(p => ({...p, user: p.user + inputTranscription.text}));
+                    if(outputTranscription) setCurrentTurn(p => ({...p, model: p.model + outputTranscription.text}));
+                    if (turnComplete) {
+                        setCurrentTurn(p => {
+                            setTranscriptHistory(h => [...h, { id: Date.now(), user: p.user, model: p.model }]);
+                            return { user: '', model: '' };
+                        });
+                    }
+                    const audioDataB64 = modelTurn?.parts[0]?.inlineData?.data;
+                    if (audioDataB64 && outputAudioContextRef.current) {
+                        nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputAudioContextRef.current.currentTime);
+                        const audioBuffer = await decodeAudioData(decode(audioDataB64), outputAudioContextRef.current, 24000, 1);
+                        const source = outputAudioContextRef.current.createBufferSource();
+                        source.buffer = audioBuffer;
+                        source.connect(outputAudioContextRef.current.destination);
+                        source.addEventListener('ended', () => sourcesRef.current.delete(source));
+                        source.start(nextStartTimeRef.current);
+                        nextStartTimeRef.current += audioBuffer.duration;
+                        sourcesRef.current.add(source);
+                    }
+                },
+                onerror: (e: ErrorEvent) => { setError(`Connection error: ${e.message}`); setAppState('error'); cleanupAudio(); },
+                onclose: () => { cleanupAudio(); setAppState('idle'); }
+            }
+        });
+    } catch (err: any) { setError(err.message); setAppState('error'); cleanupAudio(); }
+  }, [cleanupAudio]);
+
+  // --- Self-Hosted Mode ---
+  const stopSelfHostedConversation = useCallback(() => {
+    wasStoppedManuallyRef.current = true;
+    if (recognition) recognition.stop();
+    cleanupAudio();
+    setAppState('idle');
+  }, [cleanupAudio]);
+
+  const startSelfHostedConversation = useCallback(async () => {
+    if (!recognition) { setError("Web Speech API is not supported by this browser."); setAppState('error'); return; }
+    if (!llmEndpoint || !ttsEndpoint) { setError("Please set LLM and TTS endpoints in settings."); setAppState('error'); setIsSettingsOpen(true); return; }
+    
+    setError(null);
+    setAppState('listening');
+    setCurrentTurn({ user: '', model: '' });
+    finalTranscriptRef.current = '';
+    wasStoppedManuallyRef.current = false;
+
+    recognition.onresult = (event) => {
+        let interim = '', final = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) final += event.results[i][0].transcript;
+            else interim += event.results[i][0].transcript;
+        }
+        finalTranscriptRef.current = final;
+        setCurrentTurn({ user: final || interim, model: '' });
+    };
+
+    recognition.onend = async () => {
+        if (wasStoppedManuallyRef.current) return;
+        const userTranscript = finalTranscriptRef.current.trim();
+        if (!userTranscript) { setAppState('idle'); return; }
+        setAppState('processing');
+        try {
+            const llmHeaders: HeadersInit = { 'Content-Type': 'application/json' };
+            if (llmApiCred) llmHeaders['Authorization'] = llmApiCred.startsWith('Bearer ') ? llmApiCred : `Bearer ${llmApiCred}`;
+            const llmRes = await fetch(llmEndpoint, { method: 'POST', headers: llmHeaders, body: JSON.stringify({ prompt: userTranscript }) });
+            if (!llmRes.ok) throw new Error(`LLM API error: ${llmRes.statusText}`);
+            const llmResult = await llmRes.json();
+            const modelResText = llmResult.response;
+            if (!modelResText) throw new Error("LLM response format incorrect. Expected { \"response\": \"...\" }.");
+            setCurrentTurn(p => ({ ...p, model: modelResText }));
+            
+            const ttsHeaders: HeadersInit = { 'Content-Type': 'application/json' };
+            if (ttsApiCred) ttsHeaders['Authorization'] = ttsApiCred.startsWith('Bearer ') ? ttsApiCred : `Bearer ${ttsApiCred}`;
+            const ttsRes = await fetch(ttsEndpoint, { method: 'POST', headers: ttsHeaders, body: JSON.stringify({ text: modelResText }) });
+            if (!ttsRes.ok) throw new Error(`TTS API error: ${ttsRes.statusText}`);
+            const ttsResult = await ttsRes.json();
+            const audioB64 = ttsResult.audioContent;
+            if (!audioB64) throw new Error("TTS response format incorrect. Expected { \"audioContent\": \"...\" }.");
+
+            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+            if (outputAudioContextRef.current?.state === 'closed' || !outputAudioContextRef.current) outputAudioContextRef.current = new AudioContext({ sampleRate: 24000 });
+            const audioBuffer = await decodeAudioData(decode(audioB64), outputAudioContextRef.current!, 24000, 1);
+            const source = outputAudioContextRef.current!.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(outputAudioContextRef.current!.destination);
+            source.start();
+            source.onended = () => {
+                setTranscriptHistory(h => [...h, { id: Date.now(), user: userTranscript, model: modelResText }]);
+                setCurrentTurn({ user: '', model: '' });
+                setAppState('idle');
+                cleanupAudio(false);
+            };
+        } catch (err: any) { setError(err.message); setAppState('error'); }
+    };
+
+    recognition.onerror = (e) => {
+        if (e.error === 'no-speech') { setAppState('idle'); return; }
+        setError(`Speech recognition error: ${e.error}`);
+        setAppState('error');
+    };
+    
+    try {
+        micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recognition.start();
+    } catch (err: any) { setError(`Microphone access denied: ${err.message}`); setAppState('error'); cleanupAudio(); }
+
+  }, [llmEndpoint, ttsEndpoint, cleanupAudio, llmApiCred, ttsApiCred]);
+
+  // --- Main Controller ---
+  const toggleConversation = () => {
+    if (appState === 'listening') {
+        if(serviceMode === 'gemini') stopGeminiConversation();
+        else stopSelfHostedConversation();
+    } else if (appState === 'idle' || appState === 'error') {
+        if (serviceMode === 'gemini') startGeminiConversation();
+        else startSelfHostedConversation();
+    }
+  };
+  
+  // Cleanup on unmount or mode switch
+  useEffect(() => {
+    return () => {
+      if (serviceMode === 'gemini') stopGeminiConversation();
+      else stopSelfHostedConversation();
+    };
+  }, [serviceMode, stopGeminiConversation, stopSelfHostedConversation]);
+
+  return (
+    <>
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} serviceMode={serviceMode} setServiceMode={handleSetServiceMode} llmEndpoint={llmEndpoint} setLlmEndpoint={handleSetLlmEndpoint} ttsEndpoint={ttsEndpoint} setTtsEndpoint={handleSetTtsEndpoint} llmApiCred={llmApiCred} setLlmApiCred={handleSetLlmApiCred} ttsApiCred={ttsApiCred} setTtsApiCred={handleSetTtsApiCred} />
+      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-between p-4 md:p-8">
+        <header className="w-full max-w-4xl text-center relative">
+          <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
+            AI Voice Chat
+          </h1>
+          <p className="text-gray-400 mt-2">Speak and listen to your chosen AI in real-time.</p>
+          <button onClick={() => setIsSettingsOpen(true)} className="absolute top-0 right-0 p-2 text-gray-400 hover:text-white transition-colors" aria-label="Open settings">
+              <SettingsIcon />
+          </button>
+        </header>
+        <TranscriptView history={transcriptHistory} currentTurn={currentTurn} />
+        <footer className="w-full flex flex-col items-center justify-center space-y-6">
+            <StatusIndicator appState={appState} error={error} />
+            <ControlButton appState={appState} onClick={toggleConversation} />
+        </footer>
+      </div>
+    </>
+  );
+};
+
+export default App;

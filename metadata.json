@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Live Audio Chat",
+  "description": "Engage in real-time, voice-based conversations with Gemini using the Live API. Speak and listen to get instant responses and see a live transcript of your dialogue.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
