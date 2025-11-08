@@ -1,9 +1,10 @@
 import React from 'react';
 import { useState, useRef, useCallback, useEffect } from 'react';
-// FIX: Removed non-exported type 'LiveSession'.
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { AppState, TranscriptTurn, ServiceMode } from './types';
 import { createBlob, decode, decodeAudioData } from './utils/audioUtils';
+import { initSupabase, getChatHistory, saveChatTurn, performRagSearch } from './utils/supabase';
 import { ControlButton } from './components/ControlButton';
 import { StatusIndicator } from './components/StatusIndicator';
 import { TranscriptView } from './components/TranscriptView';
@@ -11,7 +12,6 @@ import { SettingsModal } from './components/SettingsModal';
 import { SettingsIcon } from './components/SettingsIcon';
 
 // Web Speech API
-// FIX: Cast window to any to access SpeechRecognition properties.
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 if (recognition) {
@@ -29,16 +29,22 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [serviceMode, setServiceMode] = useState<ServiceMode>('gemini');
   const [llmEndpoint, setLlmEndpoint] = useState('');
+  const [llmModel, setLlmModel] = useState('');
   const [ttsEndpoint, setTtsEndpoint] = useState('');
   const [llmApiCred, setLlmApiCred] = useState('');
   const [ttsApiCred, setTtsApiCred] = useState('');
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseKey, setSupabaseKey] = useState('');
+  
+  // Supabase state
+  const [supabaseClient, setSupabaseClient] = useState<SupabaseClient | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
 
   // Transcript State
   const [transcriptHistory, setTranscriptHistory] = useState<TranscriptTurn[]>([]);
   const [currentTurn, setCurrentTurn] = useState<{ user: string; model: string }>({ user: '', model: '' });
 
   // Refs for Gemini Live API
-  // FIX: Use 'any' for the session promise since 'LiveSession' type is not exported.
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -57,38 +63,48 @@ const App: React.FC = () => {
   // Effect to load settings from localStorage
   useEffect(() => {
     const savedMode = localStorage.getItem('serviceMode') as ServiceMode;
-    const savedLlmUrl = localStorage.getItem('llmEndpoint');
-    const savedTtsUrl = localStorage.getItem('ttsEndpoint');
-    const savedLlmCred = localStorage.getItem('llmApiCred');
-    const savedTtsCred = localStorage.getItem('ttsApiCred');
     if (savedMode) setServiceMode(savedMode);
-    if (savedLlmUrl) setLlmEndpoint(savedLlmUrl);
-    if (savedTtsUrl) setTtsEndpoint(savedTtsUrl);
-    if (savedLlmCred) setLlmApiCred(savedLlmCred);
-    if (savedTtsCred) setTtsApiCred(savedTtsCred);
+    setLlmEndpoint(localStorage.getItem('llmEndpoint') || '');
+    setLlmModel(localStorage.getItem('llmModel') || '');
+    setTtsEndpoint(localStorage.getItem('ttsEndpoint') || '');
+    setLlmApiCred(localStorage.getItem('llmApiCred') || '');
+    setTtsApiCred(localStorage.getItem('ttsApiCred') || '');
+    setSupabaseUrl(localStorage.getItem('supabaseUrl') || '');
+    setSupabaseKey(localStorage.getItem('supabaseKey') || '');
   }, []);
 
+  // Effect to initialize Supabase and load history
+  useEffect(() => {
+    const client = initSupabase(supabaseUrl, supabaseKey);
+    setSupabaseClient(client);
+
+    let sid = sessionStorage.getItem('chatSessionId');
+    if (!sid) {
+        sid = crypto.randomUUID();
+        sessionStorage.setItem('chatSessionId', sid);
+    }
+    sessionIdRef.current = sid;
+
+    const loadHistory = async () => {
+        if (client && sessionIdRef.current) {
+            const history = await getChatHistory(sessionIdRef.current);
+            setTranscriptHistory(history);
+        } else {
+            setTranscriptHistory([]);
+        }
+    };
+    loadHistory();
+  }, [supabaseUrl, supabaseKey]);
+
   // Handlers to save settings to localStorage
-  const handleSetServiceMode = (mode: ServiceMode) => {
-    setServiceMode(mode);
-    localStorage.setItem('serviceMode', mode);
-  };
-  const handleSetLlmEndpoint = (url: string) => {
-    setLlmEndpoint(url);
-    localStorage.setItem('llmEndpoint', url);
-  };
-  const handleSetTtsEndpoint = (url: string) => {
-    setTtsEndpoint(url);
-    localStorage.setItem('ttsEndpoint', url);
-  };
-    const handleSetLlmApiCred = (cred: string) => {
-    setLlmApiCred(cred);
-    localStorage.setItem('llmApiCred', cred);
-  };
-  const handleSetTtsApiCred = (cred: string) => {
-    setTtsApiCred(cred);
-    localStorage.setItem('ttsApiCred', cred);
-  };
+  const handleSetServiceMode = (mode: ServiceMode) => { setServiceMode(mode); localStorage.setItem('serviceMode', mode); };
+  const handleSetLlmEndpoint = (url: string) => { setLlmEndpoint(url); localStorage.setItem('llmEndpoint', url); };
+  const handleSetLlmModel = (model: string) => { setLlmModel(model); localStorage.setItem('llmModel', model); };
+  const handleSetTtsEndpoint = (url: string) => { setTtsEndpoint(url); localStorage.setItem('ttsEndpoint', url); };
+  const handleSetLlmApiCred = (cred: string) => { setLlmApiCred(cred); localStorage.setItem('llmApiCred', cred); };
+  const handleSetTtsApiCred = (cred: string) => { setTtsApiCred(cred); localStorage.setItem('ttsApiCred', cred); };
+  const handleSetSupabaseUrl = (url: string) => { setSupabaseUrl(url); localStorage.setItem('supabaseUrl', url); };
+  const handleSetSupabaseKey = (key: string) => { setSupabaseKey(key); localStorage.setItem('supabaseKey', key); };
 
   // --- Generic Cleanup ---
   const cleanupAudio = useCallback((stopPlayback = true) => {
@@ -100,21 +116,13 @@ const App: React.FC = () => {
     micStreamSourceRef.current = null;
     
     if (stopPlayback) {
-        for (const source of sourcesRef.current.values()) {
-            source.stop();
-        }
+        for (const source of sourcesRef.current.values()) { source.stop(); }
         sourcesRef.current.clear();
         nextStartTimeRef.current = 0;
     }
 
-    if (inputAudioContextRef.current?.state !== 'closed') {
-        inputAudioContextRef.current?.close().catch(console.error);
-        inputAudioContextRef.current = null;
-    }
-    if (outputAudioContextRef.current?.state !== 'closed') {
-        outputAudioContextRef.current?.close().catch(console.error);
-        outputAudioContextRef.current = null;
-    }
+    if (inputAudioContextRef.current?.state !== 'closed') { inputAudioContextRef.current?.close().catch(console.error); inputAudioContextRef.current = null; }
+    if (outputAudioContextRef.current?.state !== 'closed') { outputAudioContextRef.current?.close().catch(console.error); outputAudioContextRef.current = null; }
   }, []);
   
   // --- Gemini Mode ---
@@ -131,7 +139,7 @@ const App: React.FC = () => {
   const startGeminiConversation = useCallback(async () => {
     setError(null);
     setAppState('connecting');
-    setTranscriptHistory([]);
+    if (!supabaseClient) setTranscriptHistory([]); // Clear history if supabase is not connected
     setCurrentTurn({ user: '', model: '' });
     try {
         if (!process.env.API_KEY) throw new Error("API_KEY environment variable not set for Gemini.");
@@ -167,7 +175,9 @@ const App: React.FC = () => {
                     if(outputTranscription) setCurrentTurn(p => ({...p, model: p.model + outputTranscription.text}));
                     if (turnComplete) {
                         setCurrentTurn(p => {
-                            setTranscriptHistory(h => [...h, { id: Date.now(), user: p.user, model: p.model }]);
+                            const newTurn = { id: Date.now(), user: p.user, model: p.model };
+                            setTranscriptHistory(h => [...h, newTurn]);
+                            if (supabaseClient && sessionIdRef.current) saveChatTurn(sessionIdRef.current, { user: p.user, model: p.model });
                             return { user: '', model: '' };
                         });
                     }
@@ -189,7 +199,7 @@ const App: React.FC = () => {
             }
         });
     } catch (err: any) { setError(err.message); setAppState('error'); cleanupAudio(); }
-  }, [cleanupAudio]);
+  }, [cleanupAudio, supabaseClient]);
 
   // --- Self-Hosted Mode ---
   const stopSelfHostedConversation = useCallback(() => {
@@ -205,6 +215,7 @@ const App: React.FC = () => {
     
     setError(null);
     setAppState('listening');
+    if (!supabaseClient) setTranscriptHistory([]);
     setCurrentTurn({ user: '', model: '' });
     finalTranscriptRef.current = '';
     wasStoppedManuallyRef.current = false;
@@ -225,9 +236,20 @@ const App: React.FC = () => {
         if (!userTranscript) { setAppState('idle'); return; }
         setAppState('processing');
         try {
+            let finalPrompt = userTranscript;
+            if (supabaseClient) {
+                const context = await performRagSearch(userTranscript);
+                if (context) {
+                    finalPrompt = `Using the following context, answer the question.\n\nContext:\n${context}\n\nQuestion: ${userTranscript}`;
+                }
+            }
             const llmHeaders: HeadersInit = { 'Content-Type': 'application/json' };
             if (llmApiCred) llmHeaders['Authorization'] = llmApiCred.startsWith('Bearer ') ? llmApiCred : `Bearer ${llmApiCred}`;
-            const llmRes = await fetch(llmEndpoint, { method: 'POST', headers: llmHeaders, body: JSON.stringify({ prompt: userTranscript }) });
+            
+            const llmPayload: { prompt: string, model?: string } = { prompt: finalPrompt };
+            if (llmModel) llmPayload.model = llmModel;
+
+            const llmRes = await fetch(llmEndpoint, { method: 'POST', headers: llmHeaders, body: JSON.stringify(llmPayload) });
             if (!llmRes.ok) throw new Error(`LLM API error: ${llmRes.statusText}`);
             const llmResult = await llmRes.json();
             const modelResText = llmResult.response;
@@ -250,7 +272,9 @@ const App: React.FC = () => {
             source.connect(outputAudioContextRef.current!.destination);
             source.start();
             source.onended = () => {
-                setTranscriptHistory(h => [...h, { id: Date.now(), user: userTranscript, model: modelResText }]);
+                const newTurn = { id: Date.now(), user: userTranscript, model: modelResText };
+                setTranscriptHistory(h => [...h, newTurn]);
+                if (supabaseClient && sessionIdRef.current) saveChatTurn(sessionIdRef.current, { user: userTranscript, model: modelResText });
                 setCurrentTurn({ user: '', model: '' });
                 setAppState('idle');
                 cleanupAudio(false);
@@ -269,7 +293,7 @@ const App: React.FC = () => {
         recognition.start();
     } catch (err: any) { setError(`Microphone access denied: ${err.message}`); setAppState('error'); cleanupAudio(); }
 
-  }, [llmEndpoint, ttsEndpoint, cleanupAudio, llmApiCred, ttsApiCred]);
+  }, [llmEndpoint, ttsEndpoint, cleanupAudio, llmApiCred, ttsApiCred, supabaseClient, llmModel]);
 
   // --- Main Controller ---
   const toggleConversation = () => {
@@ -292,7 +316,26 @@ const App: React.FC = () => {
 
   return (
     <>
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} serviceMode={serviceMode} setServiceMode={handleSetServiceMode} llmEndpoint={llmEndpoint} setLlmEndpoint={handleSetLlmEndpoint} ttsEndpoint={ttsEndpoint} setTtsEndpoint={handleSetTtsEndpoint} llmApiCred={llmApiCred} setLlmApiCred={handleSetLlmApiCred} ttsApiCred={ttsApiCred} setTtsApiCred={handleSetTtsApiCred} />
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        serviceMode={serviceMode} 
+        setServiceMode={handleSetServiceMode} 
+        llmEndpoint={llmEndpoint} 
+        setLlmEndpoint={handleSetLlmEndpoint} 
+        llmModel={llmModel}
+        setLlmModel={handleSetLlmModel}
+        ttsEndpoint={ttsEndpoint} 
+        setTtsEndpoint={handleSetTtsEndpoint} 
+        llmApiCred={llmApiCred} 
+        setLlmApiCred={handleSetLlmApiCred} 
+        ttsApiCred={ttsApiCred} 
+        setTtsApiCred={handleSetTtsApiCred}
+        supabaseUrl={supabaseUrl}
+        setSupabaseUrl={handleSetSupabaseUrl}
+        supabaseKey={supabaseKey}
+        setSupabaseKey={handleSetSupabaseKey}
+      />
       <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-between p-4 md:p-8">
         <header className="w-full max-w-4xl text-center relative">
           <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
