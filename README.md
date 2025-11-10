@@ -83,6 +83,8 @@ Your LLM and TTS credentials should not be exposed on the frontend. The `llm-pro
     *   `TTS_ENDPOINT`: The URL of your Text-to-Speech service.
     *   `TTS_API_CRED`: The API key for your TTS service.
 
+> **Note on Flexibility:** The `llm-proxy` function is designed to work with a variety of backend services without code changes. It automatically parses the JSON response from your LLM endpoint by looking for text in common properties (`response`, `text`, `completion`, or standard OpenAI formats like `choices[0].message.content`). For TTS services, it looks for base64 audio data in `audioContent`, `audio`, or `data`. This allows you to easily switch between different self-hosted models.
+
 #### Step 4: Deploy Edge Functions
 
 Deploy the functions located in the `supabase/functions` directory.
@@ -101,7 +103,7 @@ To enable the app to answer questions using your own documents (RAG):
 
 1.  Set up a table in your Supabase database with the `pgvector` extension enabled.
 2.  Populate the table with your document embeddings.
-3.  The `vector-search` function is pre-configured to query this table. You may need to adjust the function's code to match your specific table and column names.
+3.  The project includes a template `vector-search` function (`supabase/functions/vector-search/index.ts`) that is correctly configured for CORS and returns mock data. To enable RAG, you must **edit this file to implement your own logic**: generate an embedding for the user's query and perform a similarity search against your database.
 
 #### Step 6: Configure The App UI
 

@@ -44,10 +44,22 @@ serve(async (req: Request) => {
       if (!res.ok) throw new Error(`LLM API error: ${res.statusText}`);
       const data = await res.json();
       
-      return new Response(JSON.stringify(data), {
+      // Standardize the response by finding the text in common keys.
+      let responseText = '';
+      if (data.response) responseText = data.response;
+      else if (data.text) responseText = data.text;
+      else if (data.completion) responseText = data.completion;
+      else if (data.choices && data.choices[0]?.message?.content) responseText = data.choices[0].message.content;
+      else if (data.choices && data.choices[0]?.text) responseText = data.choices[0].text;
+      else {
+          throw new Error('Could not find a valid response text in the LLM output. Supported keys: response, text, completion, or OpenAI `choices` format.');
+      }
+
+      return new Response(JSON.stringify({ responseText }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
       });
+
     } else if (type === 'tts') {
       // FIX: Added @ts-ignore to suppress Deno type errors in non-Deno environments.
       // @ts-ignore
@@ -70,8 +82,17 @@ serve(async (req: Request) => {
 
       if (!res.ok) throw new Error(`TTS API error: ${res.statusText}`);
       const data = await res.json();
+
+      // Standardize the TTS response.
+      let audioContent = '';
+      if (data.audioContent) audioContent = data.audioContent;
+      else if (data.audio) audioContent = data.audio;
+      else if (data.data) audioContent = data.data;
+      else {
+          throw new Error('Could not find valid audio data in the TTS output. Supported keys: audioContent, audio, data.');
+      }
       
-      return new Response(JSON.stringify(data), {
+      return new Response(JSON.stringify({ audioContent }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
       });

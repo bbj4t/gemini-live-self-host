@@ -241,8 +241,8 @@ const App: React.FC = () => {
             });
 
             if (llmError) throw new Error(`LLM Proxy Error: ${llmError.message}`);
-            const modelResText = llmResult.response;
-            if (!modelResText) throw new Error("LLM response format incorrect from proxy.");
+            const modelResText = llmResult.responseText;
+            if (!modelResText) throw new Error("Did not receive standardized LLM response from proxy.");
             setCurrentTurn(p => ({ ...p, model: modelResText }));
             
             // Call the secure TTS proxy function
@@ -251,7 +251,7 @@ const App: React.FC = () => {
             });
             if (ttsError) throw new Error(`TTS Proxy Error: ${ttsError.message}`);
             const audioB64 = ttsResult.audioContent;
-            if (!audioB64) throw new Error("TTS response format incorrect from proxy.");
+            if (!audioB64) throw new Error("Did not receive standardized TTS response from proxy.");
 
             const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
             if (outputAudioContextRef.current?.state === 'closed' || !outputAudioContextRef.current) outputAudioContextRef.current = new AudioContext({ sampleRate: 24000 });
