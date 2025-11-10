@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ServiceMode } from '../types';
+import { testSupabaseConnection } from '../utils/supabase';
+
+type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,6 +38,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [localLlmModel, setLocalLlmModel] = useState(llmModel);
   const [localSupabaseUrl, setLocalSupabaseUrl] = useState(supabaseUrl);
   const [localSupabaseKey, setLocalSupabaseKey] = useState(supabaseKey);
+  const [testStatus, setTestStatus] = useState<TestStatus>('idle');
+  const [testMessage, setTestMessage] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
@@ -43,8 +48,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setLocalLlmModel(llmModel);
         setLocalSupabaseUrl(supabaseUrl);
         setLocalSupabaseKey(supabaseKey);
+        setTestStatus('idle'); // Reset test status when modal opens
+        setTestMessage('');
     }
   }, [isOpen, serviceMode, geminiVoice, llmModel, supabaseUrl, supabaseKey]);
+
+  useEffect(() => {
+    setTestStatus('idle'); // Reset on credential change
+  }, [localSupabaseUrl, localSupabaseKey]);
 
   if (!isOpen) {
     return null;
@@ -58,6 +69,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSupabaseKey(localSupabaseKey);
     onClose();
   };
+
+  const handleTestConnection = async () => {
+    setTestStatus('testing');
+    setTestMessage('');
+    const result = await testSupabaseConnection(localSupabaseUrl, localSupabaseKey);
+    setTestMessage(result.message);
+    setTestStatus(result.success ? 'success' : 'error');
+  };
+
+  const getStatusIndicator = () => {
+    if (testStatus === 'idle') return null;
+    const color = testStatus === 'success' ? 'text-green-400' : testStatus === 'error' ? 'text-red-400' : 'text-yellow-400';
+    return (
+        <p className={`text-xs mt-2 ${color}`}>{testMessage}</p>
+    );
+  };
+
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -163,6 +191,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+          </div>
+          <div className="mt-4">
+            <button
+              onClick={handleTestConnection}
+              disabled={testStatus === 'testing' || !localSupabaseUrl || !localSupabaseKey}
+              className="w-full px-4 py-2 rounded-md text-sm font-medium text-white bg-gray-600 hover:bg-gray-500 transition-colors disabled:bg-gray-700 disabled:cursor-not-allowed"
+            >
+              {testStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+            </button>
+            {getStatusIndicator()}
           </div>
         </div>
         

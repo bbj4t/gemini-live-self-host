@@ -97,3 +97,39 @@ export const getChatHistory = async (sessionId: string): Promise<TranscriptTurn[
         model: item.model_text
     }));
 };
+
+/**
+ * Tests the connection to Supabase by invoking a simple test function.
+ * @param url - The Supabase project URL to test.
+ * @param key - The Supabase anon key to test.
+ * @returns A promise that resolves to an object with success status and a message.
+ */
+export const testSupabaseConnection = async (url: string, key: string): Promise<{ success: boolean; message: string }> => {
+    if (!url || !key) {
+        return { success: false, message: 'URL and Key are required.' };
+    }
+    try {
+        // Create a temporary client for the test
+        const testClient = createClient(url, key);
+        const { data, error } = await testClient.functions.invoke('test-connection');
+
+        if (error) {
+            if (error.message.includes('fetch failed')) {
+                return { success: false, message: 'Network error or invalid Supabase URL. Please check the URL and your network connection.' };
+            }
+            if (error.message.includes('Function not found')) {
+                return { success: false, message: 'The "test-connection" function is not deployed. Please run `supabase functions deploy test-connection`.' };
+            }
+            return { success: false, message: `Failed to connect: ${error.message}` };
+        }
+
+        if (data?.success) {
+            return { success: true, message: 'Connection successful!' };
+        }
+
+        return { success: false, message: 'Connection test failed. The function responded, but the success flag was not true.' };
+
+    } catch (err: any) {
+        return { success: false, message: `An unexpected error occurred: ${err.message}` };
+    }
+};

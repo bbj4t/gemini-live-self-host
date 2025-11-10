@@ -248,7 +248,7 @@ const App: React.FC = () => {
 
             // Call the secure LLM proxy function
             const { data: llmResult, error: llmError } = await supabaseClient.functions.invoke('llm-proxy', {
-                body: { type: 'llm', prompt: finalPrompt, model: llmModel }
+                body: { prompt: finalPrompt, model: llmModel }
             });
 
             if (llmError) throw new Error(`LLM Proxy Error: ${llmError.message}`);
@@ -257,8 +257,8 @@ const App: React.FC = () => {
             setCurrentTurn(p => ({ ...p, model: modelResText }));
             
             // Call the secure TTS proxy function
-            const { data: ttsResult, error: ttsError } = await supabaseClient.functions.invoke('llm-proxy', {
-                body: { type: 'tts', text: modelResText }
+            const { data: ttsResult, error: ttsError } = await supabaseClient.functions.invoke('tts-proxy', {
+                body: { text: modelResText }
             });
             if (ttsError) throw new Error(`TTS Proxy Error: ${ttsError.message}`);
             const audioB64 = ttsResult.audioContent;
