@@ -115,6 +115,34 @@ To enable the app to answer questions using your own documents (RAG):
 
 ---
 
+## Troubleshooting
+
+### Error: "Failed to send a request to the Edge Function"
+
+This is a common error when the browser cannot communicate with your Supabase Edge Function (`vector-search` or `llm-proxy`). Here’s how to fix it:
+
+1.  **Verify Function Deployment:** Check that your functions are deployed and healthy. Run this command in your terminal:
+    ```bash
+    supabase functions list
+    ```
+    You should see both `llm-proxy` and `vector-search` listed with a `published` status. If not, re-run the `supabase functions deploy <function-name>` command.
+
+2.  **Check Function Logs:** Look for any errors that might be happening inside the function itself.
+    ```bash
+    # Check the RAG function
+    supabase functions logs vector-search
+
+    # Check the proxy function
+    supabase functions logs llm-proxy
+    ```
+    This will show you logs in real-time. Try using the app to trigger the function and watch for any error messages in the logs.
+
+3.  **Confirm URL and Anon Key:** Double-check that the **Supabase URL** and **Supabase Anon Key** you entered in the app's Settings panel exactly match the values in your Supabase project's **API Settings** (`Settings` -> `API`). A small typo here is a very common cause of this error.
+
+4.  **CORS Headers:** Ensure that you have the `supabase/functions/_shared/cors.ts` file and that your functions are importing and using the `corsHeaders` from it. This is already configured in the provided code but is crucial if you modify the functions.
+
+---
+
 ## Application User Guide
 
 ### 1. The Main Interface
@@ -139,7 +167,7 @@ Clicking the gear icon opens the Settings modal, where you can customize the bac
 
 #### Service Mode
 
-*   **A) Gemini Mode (Default):** Provides a seamless, out-of-the-box experience by connecting directly to Google's powerful Gemini Live API. Best for users who want a high-quality, plug-and-play voice chat experience.
+*   **A) Gemini Mode (Default):** Provides a seamless, out-of-the-box experience by connecting directly to Google's powerful Gemini Live API. Best for users who want a high-quality, plug-and-play voice chat experience. In this mode, you can select from several different voices for the AI's responses.
 
 *   **B) Self-Hosted Mode:** For advanced users who want to connect the app to their own custom LLMs and Text-to-Speech (TTS) services. Best for developers who need to use proprietary models, control their data, or integrate with their own knowledge bases.
 

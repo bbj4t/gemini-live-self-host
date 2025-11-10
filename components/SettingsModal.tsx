@@ -6,6 +6,8 @@ interface SettingsModalProps {
   onClose: () => void;
   serviceMode: ServiceMode;
   setServiceMode: (mode: ServiceMode) => void;
+  geminiVoice: string;
+  setGeminiVoice: (voice: string) => void;
   llmModel: string;
   setLlmModel: (model: string) => void;
   supabaseUrl: string;
@@ -19,6 +21,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   serviceMode,
   setServiceMode,
+  geminiVoice,
+  setGeminiVoice,
   llmModel,
   setLlmModel,
   supabaseUrl,
@@ -27,6 +31,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   setSupabaseKey,
 }) => {
   const [localServiceMode, setLocalServiceMode] = useState(serviceMode);
+  const [localGeminiVoice, setLocalGeminiVoice] = useState(geminiVoice);
   const [localLlmModel, setLocalLlmModel] = useState(llmModel);
   const [localSupabaseUrl, setLocalSupabaseUrl] = useState(supabaseUrl);
   const [localSupabaseKey, setLocalSupabaseKey] = useState(supabaseKey);
@@ -34,11 +39,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
         setLocalServiceMode(serviceMode);
+        setLocalGeminiVoice(geminiVoice);
         setLocalLlmModel(llmModel);
         setLocalSupabaseUrl(supabaseUrl);
         setLocalSupabaseKey(supabaseKey);
     }
-  }, [isOpen, serviceMode, llmModel, supabaseUrl, supabaseKey]);
+  }, [isOpen, serviceMode, geminiVoice, llmModel, supabaseUrl, supabaseKey]);
 
   if (!isOpen) {
     return null;
@@ -46,6 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSave = () => {
     setServiceMode(localServiceMode);
+    setGeminiVoice(localGeminiVoice);
     setLlmModel(localLlmModel);
     setSupabaseUrl(localSupabaseUrl);
     setSupabaseKey(localSupabaseKey);
@@ -80,6 +87,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
         </div>
+        
+        {localServiceMode === 'gemini' && (
+            <div className="animate-fade-in mb-6">
+                <label htmlFor="gemini-voice" className="block text-gray-400 text-sm font-bold mb-2">
+                Gemini Voice
+                </label>
+                <select
+                id="gemini-voice"
+                value={localGeminiVoice}
+                onChange={(e) => setLocalGeminiVoice(e.target.value)}
+                className="w-full px-3 py-2 text-white bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                    <option value="Zephyr">Zephyr (Female)</option>
+                    <option value="Puck">Puck (Male)</option>
+                    <option value="Charon">Charon (Male, Deep)</option>
+                    <option value="Kore">Kore (Female)</option>
+                    <option value="Fenrir">Fenrir (Male)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-2">Select a voice for Gemini's audio responses.</p>
+            </div>
+        )}
 
         {localServiceMode === 'self-hosted' && (
           <div className="space-y-4 animate-fade-in mb-6">

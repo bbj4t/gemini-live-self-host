@@ -28,6 +28,7 @@ const App: React.FC = () => {
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [serviceMode, setServiceMode] = useState<ServiceMode>('gemini');
+  const [geminiVoice, setGeminiVoice] = useState('Zephyr');
   const [llmModel, setLlmModel] = useState('');
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
@@ -60,6 +61,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const savedMode = localStorage.getItem('serviceMode') as ServiceMode;
     if (savedMode) setServiceMode(savedMode);
+    setGeminiVoice(localStorage.getItem('geminiVoice') || 'Zephyr');
     setLlmModel(localStorage.getItem('llmModel') || '');
     setSupabaseUrl(localStorage.getItem('supabaseUrl') || '');
     setSupabaseKey(localStorage.getItem('supabaseKey') || '');
@@ -95,6 +97,7 @@ const App: React.FC = () => {
 
   // Handlers to save settings to localStorage
   const handleSetServiceMode = (mode: ServiceMode) => { setServiceMode(mode); localStorage.setItem('serviceMode', mode); };
+  const handleSetGeminiVoice = (voice: string) => { setGeminiVoice(voice); localStorage.setItem('geminiVoice', voice); };
   const handleSetLlmModel = (model: string) => { setLlmModel(model); localStorage.setItem('llmModel', model); };
   const handleSetSupabaseUrl = (url: string) => { setSupabaseUrl(url); localStorage.setItem('supabaseUrl', url); };
   const handleSetSupabaseKey = (key: string) => { setSupabaseKey(key); localStorage.setItem('supabaseKey', key); };
@@ -146,7 +149,10 @@ const App: React.FC = () => {
             config: {
                 responseModalities: [Modality.AUDIO],
                 inputAudioTranscription: {}, outputAudioTranscription: {},
-                systemInstruction: 'You are a helpful and friendly conversational AI. Your responses should be concise and conversational.'
+                systemInstruction: 'You are a helpful and friendly conversational AI. Your responses should be concise and conversational.',
+                speechConfig: {
+                    voiceConfig: { prebuiltVoiceConfig: { voiceName: geminiVoice } },
+                },
             },
             callbacks: {
                 onopen: () => {
@@ -163,7 +169,7 @@ const App: React.FC = () => {
                     scriptProcessor.connect(inputAudioContextRef.current!.destination);
                 },
                 onmessage: async (message: LiveServerMessage) => {
-                    const { outputTranscription, inputTranscription, turnComplete, modelTurn } = message.serverContent ?? {};
+                    const { outputTranscription, inputTranscription, turnComplete, modelTurn, interrupted } = message.serverContent ?? {};
                     if(inputTranscription) setCurrentTurn(p => ({...p, user: p.user + inputTranscription.text}));
                     if(outputTranscription) setCurrentTurn(p => ({...p, model: p.model + outputTranscription.text}));
                     if (turnComplete) {
@@ -186,13 +192,18 @@ const App: React.FC = () => {
                         nextStartTimeRef.current += audioBuffer.duration;
                         sourcesRef.current.add(source);
                     }
+                    if (interrupted) {
+                        for (const source of sourcesRef.current.values()) { source.stop(); }
+                        sourcesRef.current.clear();
+                        nextStartTimeRef.current = 0;
+                    }
                 },
                 onerror: (e: ErrorEvent) => { setError(`Connection error: ${e.message}`); setAppState('error'); cleanupAudio(); },
                 onclose: () => { cleanupAudio(); setAppState('idle'); }
             }
         });
     } catch (err: any) { setError(err.message); setAppState('error'); cleanupAudio(); }
-  }, [cleanupAudio, supabaseClient]);
+  }, [cleanupAudio, supabaseClient, geminiVoice]);
 
   // --- Self-Hosted Mode ---
   const stopSelfHostedConversation = useCallback(() => {
@@ -310,6 +321,8 @@ const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)} 
         serviceMode={serviceMode} 
         setServiceMode={handleSetServiceMode}
+        geminiVoice={geminiVoice}
+        setGeminiVoice={handleSetGeminiVoice}
         llmModel={llmModel}
         setLlmModel={handleSetLlmModel}
         supabaseUrl={supabaseUrl}
